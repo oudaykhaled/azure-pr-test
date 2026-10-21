@@ -1,0 +1,55 @@
+# Run from this trusted repository, never from the PR's source branch.
+trigger: none
+pr: none
+
+schedules:
+  # 336 runs/week: below Azure's documented ~1000 scheduled runs/week limit.
+  - cron: '*/30 * * * *'
+    displayName: Process PR quizzes every 30 minutes (UTC)
+    branches:
+      include:
+        - main
+    always: true
+
+# Add an Exclusive lock check to the buut-pr-test environment in Azure DevOps.
+# This serializes scheduled and manual runs; lockBehavior alone is insufficient.
+lockBehavior: sequential
+variables:
+  - group: buut-pr-test
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+  - stage: Quiz
+    jobs:
+      - deployment: CheckPullRequests
+        environment: buut-pr-test
+        timeoutInMinutes: 25
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                  persistCredentials: false
+                - task: NodeTool@0
+                  inputs:
+                    versionSpec: '22.x'
+                - script: npm ci --ignore-scripts
+                  displayName: Install locked package metadata
+                - script: npm run verify
+                  displayName: Verify trusted quiz implementation
+                - script: npm start
+                  displayName: Generate quizzes and check Azure PR answers
+                  env:
+                    AZURE_ORG_URL: $(AZURE_ORG_URL)
+                    AZURE_PROJECT: $(AZURE_PROJECT)
+                    AZURE_REPOSITORY_ID: $(AZURE_REPOSITORY_ID)
+                    AZURE_BOT_ID: $(AZURE_BOT_ID)
+                    AZURE_TOKEN: $(System.AccessToken)
+                    AZURE_AUTH_TYPE: bearer
+                    QUIZ_STATE_KEY: $(QUIZ_STATE_KEY)
+                    LLM_PROVIDER: azure-openai
+                    AZURE_OPENAI_ENDPOINT: $(AZURE_OPENAI_ENDPOINT)
+                    AZURE_OPENAI_API_KEY: $(AZURE_OPENAI_API_KEY)
+                    AZURE_OPENAI_DEPLOYMENT: $(AZURE_OPENAI_DEPLOYMENT)
